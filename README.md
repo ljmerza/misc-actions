@@ -165,3 +165,328 @@ Delete a PR-tagged container image from GHCR.
 | `tag` | **yes** | — | Image tag to delete |
 | `owner` | no | `""` | Package owner (defaults to `github.repository_owner`) |
 | `token` | **yes** | — | GitHub token with `packages:write` |
+
+---
+
+## Full Workflow Examples
+
+### Python/Django Project (backend only)
+
+A project with ruff linting, pytest with coverage, Docker image builds with provenance attestations, and PR image cleanup.
+
+**`.github/workflows/tests.yml`** (reusable):
+```yaml
+name: Tests
+
+on:
+  workflow_call: {}
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ljmerza/misc-actions/actions/ruff-lint@main
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ljmerza/misc-actions/actions/python-test@main
+        with:
+          coverage-source: myapp
+          codecov-token: ${{ secrets.CODECOV_TOKEN }}
+          env-vars: |
+            SECRET_KEY=test-secret-key
+            DEBUG=True
+```
+
+**`.github/workflows/ci.yml`** (pull requests):
+```yaml
+name: CI
+
+on:
+  pull_request: {}
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/my-app
+
+jobs:
+  tests:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/tests.yml
+    secrets: inherit
+
+  build-and-push:
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-latest
+    needs: tests
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ljmerza/misc-actions/actions/docker-build-push@main
+        with:
+          image-name: ${{ env.IMAGE_NAME }}
+          registry-password: ${{ secrets.GITHUB_TOKEN }}
+          tags: |
+            type=raw,value=pr-${{ github.event.pull_request.number }}
+            type=sha,prefix=sha-
+```
+
+**`.github/workflows/build-and-push.yml`** (production):
+```yaml
+name: Build and Push Image
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  release:
+    types: [published]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/my-app
+
+jobs:
+  tests:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/tests.yml
+    secrets: inherit
+
+  build-and-push:
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    runs-on: ubuntu-latest
+    needs: tests
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ljmerza/misc-actions/actions/docker-build-push@main
+        id: build
+        with:
+          image-name: ${{ env.IMAGE_NAME }}
+          registry-password: ${{ secrets.GITHUB_TOKEN }}
+          tags: |
+            type=ref,event=tag
+            type=sha,prefix=sha-
+            type=raw,value=main,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ github.event_name == 'release' }}
+
+      - uses: ljmerza/misc-actions/actions/provenance-attest@main
+        with:
+          image-name: ${{ env.IMAGE_NAME }}
+          digest: ${{ steps.build.outputs.digest }}
+```
+
+**`.github/workflows/cleanup-pr-image.yml`**:
+```yaml
+name: Cleanup PR Image
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: ljmerza/misc-actions/actions/cleanup-pr-image@main
+        with:
+          package-name: my-app
+          tag: pr-${{ github.event.pull_request.number }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+---
+
+### Full-Stack Project (Python backend + React frontend)
+
+Same as above but with ESLint for the frontend, Vitest with coverage, and a multi-stage Docker build target.
+
+**`.github/workflows/tests.yml`** (reusable):
+```yaml
+name: Tests
+
+on:
+  workflow_call: {}
+
+jobs:
+  backend-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ljmerza/misc-actions/actions/ruff-lint@main
+        with:
+          working-directory: backend
+
+  frontend-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ljmerza/misc-actions/actions/eslint@main
+        with:
+          working-directory: frontend
+
+  backend-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ljmerza/misc-actions/actions/python-test@main
+        with:
+          working-directory: backend
+          coverage-source: myapp,accounts,notifications
+          codecov-token: ${{ secrets.CODECOV_TOKEN }}
+          codecov-flags: backend
+          env-vars: |
+            SECRET_KEY=test-secret-key
+            DEBUG=True
+
+  frontend-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ljmerza/misc-actions/actions/frontend-test@main
+        with:
+          working-directory: frontend
+          test-command: "npx vitest run --coverage"
+          codecov-token: ${{ secrets.CODECOV_TOKEN }}
+          codecov-flags: frontend
+```
+
+**`.github/workflows/ci.yml`** (pull requests):
+```yaml
+name: CI
+
+on:
+  pull_request: {}
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/my-app
+
+jobs:
+  tests:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/tests.yml
+    secrets: inherit
+
+  build-and-push:
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-latest
+    needs: tests
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ljmerza/misc-actions/actions/docker-build-push@main
+        with:
+          image-name: ${{ env.IMAGE_NAME }}
+          build-target: production
+          registry-password: ${{ secrets.GITHUB_TOKEN }}
+          tags: |
+            type=raw,value=pr-${{ github.event.pull_request.number }}
+            type=sha,prefix=sha-
+```
+
+**`.github/workflows/build-and-push.yml`** (production):
+```yaml
+name: Build and Push Image
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  release:
+    types: [published]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/my-app
+
+jobs:
+  tests:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/tests.yml
+    secrets: inherit
+
+  build-and-push:
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    runs-on: ubuntu-latest
+    needs: tests
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ljmerza/misc-actions/actions/docker-build-push@main
+        id: build
+        with:
+          image-name: ${{ env.IMAGE_NAME }}
+          build-target: production
+          registry-password: ${{ secrets.GITHUB_TOKEN }}
+          tags: |
+            type=ref,event=tag
+            type=sha,prefix=sha-
+            type=raw,value=main,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ github.event_name == 'release' }}
+
+      - uses: ljmerza/misc-actions/actions/provenance-attest@main
+        with:
+          image-name: ${{ env.IMAGE_NAME }}
+          digest: ${{ steps.build.outputs.digest }}
+```
+
+**`.github/workflows/cleanup-pr-image.yml`**:
+```yaml
+name: Cleanup PR Image
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: ljmerza/misc-actions/actions/cleanup-pr-image@main
+        with:
+          package-name: my-app
+          tag: pr-${{ github.event.pull_request.number }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+```
