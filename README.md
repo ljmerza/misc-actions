@@ -2,6 +2,18 @@
 
 Shared GitHub Actions composite actions used across multiple projects.
 
+## Image Tagging Flow
+
+Every event produces a `sha-` tag so you can always trace an image back to the exact commit.
+
+| Event | Image Tags | Notes |
+|---|---|---|
+| PR opened / new commit pushed | `pr-42`, `sha-abc1234` | Built in `ci.yml`, fork-protected |
+| Merged to main | `main`, `sha-abc1234` | Built in `build-and-push.yml` |
+| Git tag `v1.2.0` pushed | `v1.2.0`, `sha-abc1234` | Built in `build-and-push.yml` |
+| GitHub release published | `latest`, `v1.2.0`, `sha-abc1234` | Built in `build-and-push.yml` |
+| PR closed | `pr-42` **deleted** | Cleaned up by `cleanup-pr-image.yml` |
+
 ## Actions
 
 ### [`ruff-lint`](actions/ruff-lint/action.yml)
