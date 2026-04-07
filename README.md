@@ -13,14 +13,14 @@ Run Ruff linter and formatter checks using uv.
   with:
     python-version: "3.12"        # optional, default: 3.12
     working-directory: "."        # optional, default: .
-    uv-install-args: "--all-extras" # optional, default: --all-extras
 ```
 
 | Input | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `python-version` | no | `3.12` | Python version to install |
 | `working-directory` | no | `.` | Directory to lint |
-| `uv-install-args` | no | `--all-extras` | Arguments for `uv sync` (e.g. `--all-extras` or `--group dev`) |
+
+> Requires `[dependency-groups] dev` in `pyproject.toml` with ruff as a dependency.
 
 ---
 
@@ -63,8 +63,9 @@ Run pytest with coverage via uv and optionally upload to Codecov.
 | `coverage-source` | **yes** | — | Comma-separated packages for `--cov=` |
 | `codecov-token` | no | `""` | Codecov token (skip upload if empty) |
 | `codecov-flags` | no | `""` | Codecov flags (e.g. `backend`) |
-| `uv-install-args` | no | `--all-extras` | Arguments for `uv sync` |
 | `env-vars` | no | `""` | Newline-separated `KEY=VALUE` env vars for tests |
+
+> Requires `[dependency-groups] dev` in `pyproject.toml` with pytest and pytest-cov as dependencies.
 
 ---
 

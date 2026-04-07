@@ -21,10 +21,6 @@ inputs:
     description: Codecov flags for this upload (e.g. "backend")
     required: false
     default: ""
-  uv-install-args:
-    description: Arguments for uv sync (e.g. --all-extras or --group dev)
-    required: false
-    default: "--all-extras"
   env-vars:
     description: "Newline-separated KEY=VALUE environment variables for tests"
     required: false
@@ -45,7 +41,7 @@ runs:
     - name: Install dependencies
       shell: bash
       working-directory: ${{ inputs.working-directory }}
-      run: uv sync --frozen ${{ inputs.uv-install-args }}
+      run: uv sync --frozen --group dev
 
     - name: Run tests with coverage
       shell: bash
