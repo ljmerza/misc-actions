@@ -30,7 +30,7 @@ runs:
   using: composite
   steps:
     - name: Set up Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v6
       with:
         node-version: ${{ inputs.node-version }}
         cache: npm
@@ -48,7 +48,7 @@ runs:
 
     - name: Upload coverage to Codecov
       if: always() && inputs.codecov-token != ''
-      uses: codecov/codecov-action@v4
+      uses: codecov/codecov-action@v6
       with:
         files: ${{ inputs.working-directory }}/${{ inputs.coverage-file }}
         flags: ${{ inputs.codecov-flags }}
