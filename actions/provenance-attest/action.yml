@@ -1,0 +1,24 @@
+name: Provenance Attestation
+description: Generate SLSA build provenance attestation for a container image
+
+inputs:
+  image-name:
+    description: Full image name (e.g. ghcr.io/owner/app)
+    required: true
+  digest:
+    description: Image digest from the build step
+    required: true
+  push-to-registry:
+    description: Push attestation to the container registry
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Generate artifact attestation
+      uses: actions/attest-build-provenance@v2
+      with:
+        subject-name: ${{ inputs.image-name }}
+        subject-digest: ${{ inputs.digest }}
+        push-to-registry: ${{ inputs.push-to-registry }}

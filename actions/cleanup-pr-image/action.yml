@@ -1,0 +1,55 @@
+name: Cleanup PR Image
+description: Delete a PR-tagged container image from GHCR
+
+inputs:
+  package-name:
+    description: GHCR package name (e.g. "pihole-checkpoint")
+    required: true
+  tag:
+    description: Image tag to delete (e.g. "pr-42")
+    required: true
+  owner:
+    description: Package owner (defaults to github.repository_owner)
+    required: false
+    default: ""
+  token:
+    description: GitHub token with packages:write permission
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Delete image from GHCR
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        TAG: ${{ inputs.tag }}
+        OWNER: ${{ inputs.owner || github.repository_owner }}
+        PACKAGE_NAME: ${{ inputs.package-name }}
+      run: |
+        echo "Looking up image version for tag: ${TAG}"
+
+        # Resolve the package version ID for the tag (try org then user endpoint)
+        VERSION_ID=$(
+          gh api "/orgs/${OWNER}/packages/container/${PACKAGE_NAME}/versions" \
+            --paginate --jq '.[] | select(any((.metadata.container.tags // [])[]; . == "'"${TAG}"'")) | .id' 2>/dev/null | head -n 1
+        ) || VERSION_ID=$(
+          gh api "/users/${OWNER}/packages/container/${PACKAGE_NAME}/versions" \
+            --paginate --jq '.[] | select(any((.metadata.container.tags // [])[]; . == "'"${TAG}"'")) | .id' 2>/dev/null | head -n 1
+        ) || true
+
+        if [ -z "${VERSION_ID}" ] || [ "${VERSION_ID}" = "null" ]; then
+          echo "No image found with tag ${TAG} — nothing to clean up"
+          exit 0
+        fi
+
+        echo "Deleting version ${VERSION_ID} (tag: ${TAG})"
+        if ! gh api --method DELETE \
+          "/orgs/${OWNER}/packages/container/${PACKAGE_NAME}/versions/${VERSION_ID}" 2>/dev/null \
+        && ! gh api --method DELETE \
+          "/users/${OWNER}/packages/container/${PACKAGE_NAME}/versions/${VERSION_ID}" 2>/dev/null; then
+          echo "::warning::Could not delete ${TAG} (it may be the last tagged version — delete the package manually if needed)"
+          exit 0
+        fi
+
+        echo "Deleted ${TAG}"
