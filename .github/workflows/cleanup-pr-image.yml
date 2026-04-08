@@ -1,0 +1,24 @@
+name: Cleanup PR Image
+
+on:
+  workflow_call:
+    inputs:
+      package-name:
+        description: "GHCR package name (e.g. \"flowhistory\")"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: ljmerza/misc-actions/actions/cleanup-pr-image@v1
+        with:
+          package-name: ${{ inputs.package-name }}
+          tag: pr-${{ github.event.pull_request.number }}
+          token: ${{ secrets.GITHUB_TOKEN }}

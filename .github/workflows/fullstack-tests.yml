@@ -1,0 +1,88 @@
+name: Full-Stack Tests
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: Python version to install
+        type: string
+        default: "3.12"
+      coverage-source:
+        description: "Comma-separated packages for --cov (e.g. \"accounts,alarm,locks\")"
+        required: true
+        type: string
+      codecov-backend-flags:
+        description: Codecov flags for backend coverage upload
+        type: string
+        default: "backend"
+      env-vars:
+        description: "Newline-separated KEY=VALUE environment variables for backend tests"
+        type: string
+        default: ""
+      node-version:
+        description: Node.js version to install
+        type: string
+        default: "20"
+      frontend-working-directory:
+        description: Frontend directory
+        type: string
+        default: "frontend"
+      frontend-test-command:
+        description: Frontend test command to run
+        type: string
+        default: "npm test"
+      codecov-frontend-flags:
+        description: Codecov flags for frontend coverage upload
+        type: string
+        default: "frontend"
+      frontend-coverage-file:
+        description: Coverage output path relative to frontend working directory
+        type: string
+        default: "coverage/coverage-final.json"
+    secrets:
+      CODECOV_TOKEN:
+        description: Codecov upload token (skip upload if not provided)
+        required: false
+
+jobs:
+  backend-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ljmerza/misc-actions/actions/ruff-lint@v1
+        with:
+          python-version: ${{ inputs.python-version }}
+
+  frontend-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ljmerza/misc-actions/actions/eslint@v1
+        with:
+          node-version: ${{ inputs.node-version }}
+          working-directory: ${{ inputs.frontend-working-directory }}
+
+  backend-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ljmerza/misc-actions/actions/python-test@v1
+        with:
+          python-version: ${{ inputs.python-version }}
+          coverage-source: ${{ inputs.coverage-source }}
+          codecov-token: ${{ secrets.CODECOV_TOKEN }}
+          codecov-flags: ${{ inputs.codecov-backend-flags }}
+          env-vars: ${{ inputs.env-vars }}
+
+  frontend-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ljmerza/misc-actions/actions/frontend-test@v1
+        with:
+          node-version: ${{ inputs.node-version }}
+          working-directory: ${{ inputs.frontend-working-directory }}
+          test-command: ${{ inputs.frontend-test-command }}
+          codecov-token: ${{ secrets.CODECOV_TOKEN }}
+          codecov-flags: ${{ inputs.codecov-frontend-flags }}
+          coverage-file: ${{ inputs.frontend-coverage-file }}

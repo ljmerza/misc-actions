@@ -1,6 +1,6 @@
 # misc-actions
 
-Shared GitHub Actions composite actions used across multiple projects.
+Shared GitHub Actions composite actions and reusable workflows used across multiple projects.
 
 ## Image Tagging Flow
 
@@ -180,38 +180,156 @@ Delete a PR-tagged container image from GHCR.
 
 ---
 
+## Reusable Workflows
+
+These workflows compose the actions above into complete CI/CD pipelines. Consuming repos only need thin wrapper workflows.
+
+### [`python-tests.yml`](.github/workflows/python-tests.yml)
+
+Reusable test workflow for Python-only projects (ruff lint + pytest with coverage).
+
+```yaml
+jobs:
+  tests:
+    uses: ljmerza/misc-actions/.github/workflows/python-tests.yml@v2
+    with:
+      python-version: "3.13"
+      coverage-source: backup
+      env-vars: |
+        SECRET_KEY=test-secret-key
+        DEBUG=True
+    secrets: inherit
+```
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `python-version` | no | `3.12` | Python version |
+| `coverage-source` | **yes** | — | Comma-separated packages for `--cov=` |
+| `env-vars` | no | `""` | Newline-separated `KEY=VALUE` env vars for tests |
+
+| Secret | Required | Description |
+|--------|----------|-------------|
+| `CODECOV_TOKEN` | no | Codecov upload token |
+
+---
+
+### [`fullstack-tests.yml`](.github/workflows/fullstack-tests.yml)
+
+Reusable test workflow for full-stack projects (ruff + eslint + pytest + frontend tests).
+
+```yaml
+jobs:
+  tests:
+    uses: ljmerza/misc-actions/.github/workflows/fullstack-tests.yml@v2
+    with:
+      coverage-source: accounts,alarm,locks
+      codecov-backend-flags: backend
+      env-vars: |
+        SECRET_KEY=ci
+        DEBUG=True
+      frontend-working-directory: frontend
+      frontend-test-command: "npm test"
+      codecov-frontend-flags: frontend
+    secrets: inherit
+```
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `python-version` | no | `3.12` | Python version |
+| `coverage-source` | **yes** | — | Comma-separated packages for `--cov=` |
+| `codecov-backend-flags` | no | `backend` | Codecov flags for backend coverage |
+| `env-vars` | no | `""` | Newline-separated `KEY=VALUE` env vars for backend tests |
+| `node-version` | no | `20` | Node.js version |
+| `frontend-working-directory` | no | `frontend` | Frontend directory |
+| `frontend-test-command` | no | `npm test` | Frontend test command |
+| `codecov-frontend-flags` | no | `frontend` | Codecov flags for frontend coverage |
+| `frontend-coverage-file` | no | `coverage/coverage-final.json` | Coverage output path |
+
+| Secret | Required | Description |
+|--------|----------|-------------|
+| `CODECOV_TOKEN` | no | Codecov upload token |
+
+---
+
+### [`docker-ci.yml`](.github/workflows/docker-ci.yml)
+
+Reusable workflow to build and push a PR Docker image. Fork-safe (skips builds from fork PRs).
+
+Tags: `pr-{number}`, `sha-{hash}`
+
+```yaml
+jobs:
+  build:
+    needs: tests
+    uses: ljmerza/misc-actions/.github/workflows/docker-ci.yml@v2
+    with:
+      image-name: ghcr.io/${{ github.repository_owner }}/my-app
+    secrets: inherit
+```
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `image-name` | **yes** | — | Full image name |
+| `build-target` | no | `""` | Docker build target stage |
+| `build-args` | no | `""` | Docker build arguments |
+
+---
+
+### [`docker-release.yml`](.github/workflows/docker-release.yml)
+
+Reusable workflow to build, push, and attest a Docker image for main/release events.
+
+Tags: `ref/tag`, `sha-{hash}`, `main` (if default branch), `latest` (if release)
+
+```yaml
+jobs:
+  build:
+    needs: tests
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    uses: ljmerza/misc-actions/.github/workflows/docker-release.yml@v2
+    with:
+      image-name: ghcr.io/${{ github.repository_owner }}/my-app
+    secrets: inherit
+```
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `image-name` | **yes** | — | Full image name |
+| `build-target` | no | `""` | Docker build target stage |
+| `build-args` | no | `""` | Docker build arguments |
+
+> **Note:** The calling job must declare `attestations: write` and `id-token: write` permissions.
+
+---
+
+### [`cleanup-pr-image.yml`](.github/workflows/cleanup-pr-image.yml)
+
+Reusable workflow to delete a PR-tagged container image from GHCR when a PR is closed. Fork-safe.
+
+```yaml
+jobs:
+  cleanup:
+    uses: ljmerza/misc-actions/.github/workflows/cleanup-pr-image.yml@v2
+    with:
+      package-name: my-app
+    secrets: inherit
+```
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `package-name` | **yes** | — | GHCR package name |
+
+---
+
 ## Full Workflow Examples
 
 ### Python/Django Project (backend only)
 
-A project with ruff linting, pytest with coverage, Docker image builds with provenance attestations, and PR image cleanup.
-
-**`.github/workflows/tests.yml`** (reusable):
-```yaml
-name: Tests
-
-on:
-  workflow_call: {}
-
-jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: ljmerza/misc-actions/actions/ruff-lint@main
-
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: ljmerza/misc-actions/actions/python-test@main
-        with:
-          coverage-source: myapp
-          codecov-token: ${{ secrets.CODECOV_TOKEN }}
-          env-vars: |
-            SECRET_KEY=test-secret-key
-            DEBUG=True
-```
+Only 3 files needed — no local `tests.yml` required.
 
 **`.github/workflows/ci.yml`** (pull requests):
 ```yaml
@@ -224,32 +342,27 @@ concurrency:
   group: ci-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
-env:
-  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/my-app
-
 jobs:
   tests:
     permissions:
       contents: read
-    uses: ./.github/workflows/tests.yml
+    uses: ljmerza/misc-actions/.github/workflows/python-tests.yml@v2
+    with:
+      coverage-source: myapp
+      env-vars: |
+        SECRET_KEY=test-secret-key
+        DEBUG=True
     secrets: inherit
 
-  build-and-push:
+  build:
+    needs: tests
     permissions:
       contents: read
       packages: write
-    runs-on: ubuntu-latest
-    needs: tests
-    if: github.event.pull_request.head.repo.full_name == github.repository
-    steps:
-      - uses: actions/checkout@v6
-      - uses: ljmerza/misc-actions/actions/docker-build-push@main
-        with:
-          image-name: ${{ env.IMAGE_NAME }}
-          registry-password: ${{ secrets.GITHUB_TOKEN }}
-          tags: |
-            type=raw,value=pr-${{ github.event.pull_request.number }}
-            type=sha,prefix=sha-
+    uses: ljmerza/misc-actions/.github/workflows/docker-ci.yml@v2
+    with:
+      image-name: ghcr.io/${{ github.repository_owner }}/my-app
+    secrets: inherit
 ```
 
 **`.github/workflows/build-and-push.yml`** (production):
@@ -259,7 +372,6 @@ name: Build and Push Image
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   release:
     types: [published]
 
@@ -267,42 +379,29 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/my-app
-
 jobs:
   tests:
     permissions:
       contents: read
-    uses: ./.github/workflows/tests.yml
+    uses: ljmerza/misc-actions/.github/workflows/python-tests.yml@v2
+    with:
+      coverage-source: myapp
+      env-vars: |
+        SECRET_KEY=test-secret-key
+        DEBUG=True
     secrets: inherit
 
-  build-and-push:
+  build:
+    needs: tests
     permissions:
       contents: read
       packages: write
       attestations: write
       id-token: write
-    runs-on: ubuntu-latest
-    needs: tests
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: ljmerza/misc-actions/actions/docker-build-push@main
-        id: build
-        with:
-          image-name: ${{ env.IMAGE_NAME }}
-          registry-password: ${{ secrets.GITHUB_TOKEN }}
-          tags: |
-            type=ref,event=tag
-            type=sha,prefix=sha-
-            type=raw,value=main,enable={{is_default_branch}}
-            type=raw,value=latest,enable=${{ github.event_name == 'release' }}
-
-      - uses: ljmerza/misc-actions/actions/provenance-attest@main
-        with:
-          image-name: ${{ env.IMAGE_NAME }}
-          digest: ${{ steps.build.outputs.digest }}
+    uses: ljmerza/misc-actions/.github/workflows/docker-release.yml@v2
+    with:
+      image-name: ghcr.io/${{ github.repository_owner }}/my-app
+    secrets: inherit
 ```
 
 **`.github/workflows/cleanup-pr-image.yml`**:
@@ -313,77 +412,19 @@ on:
   pull_request:
     types: [closed]
 
-permissions:
-  contents: read
-  packages: write
-
 jobs:
   cleanup:
-    runs-on: ubuntu-latest
-    if: github.event.pull_request.head.repo.full_name == github.repository
-    steps:
-      - uses: ljmerza/misc-actions/actions/cleanup-pr-image@main
-        with:
-          package-name: my-app
-          tag: pr-${{ github.event.pull_request.number }}
-          token: ${{ secrets.GITHUB_TOKEN }}
+    uses: ljmerza/misc-actions/.github/workflows/cleanup-pr-image.yml@v2
+    with:
+      package-name: my-app
+    secrets: inherit
 ```
 
 ---
 
 ### Full-Stack Project (Python backend + React frontend)
 
-Same as above but with ESLint for the frontend, Vitest with coverage, and a multi-stage Docker build target.
-
-**`.github/workflows/tests.yml`** (reusable):
-```yaml
-name: Tests
-
-on:
-  workflow_call: {}
-
-jobs:
-  backend-lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: ljmerza/misc-actions/actions/ruff-lint@main
-        with:
-          working-directory: backend
-
-  frontend-lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: ljmerza/misc-actions/actions/eslint@main
-        with:
-          working-directory: frontend
-
-  backend-test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: ljmerza/misc-actions/actions/python-test@main
-        with:
-          working-directory: backend
-          coverage-source: myapp,accounts,notifications
-          codecov-token: ${{ secrets.CODECOV_TOKEN }}
-          codecov-flags: backend
-          env-vars: |
-            SECRET_KEY=test-secret-key
-            DEBUG=True
-
-  frontend-test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: ljmerza/misc-actions/actions/frontend-test@main
-        with:
-          working-directory: frontend
-          test-command: "npx vitest run --coverage"
-          codecov-token: ${{ secrets.CODECOV_TOKEN }}
-          codecov-flags: frontend
-```
+Same 3-file structure but uses `fullstack-tests.yml` and passes `build-target`.
 
 **`.github/workflows/ci.yml`** (pull requests):
 ```yaml
@@ -396,33 +437,32 @@ concurrency:
   group: ci-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
-env:
-  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/my-app
-
 jobs:
   tests:
     permissions:
       contents: read
-    uses: ./.github/workflows/tests.yml
+    uses: ljmerza/misc-actions/.github/workflows/fullstack-tests.yml@v2
+    with:
+      coverage-source: accounts,alarm,locks
+      codecov-backend-flags: backend
+      env-vars: |
+        SECRET_KEY=ci
+        DEBUG=True
+      frontend-working-directory: frontend
+      frontend-test-command: "npm test"
+      codecov-frontend-flags: frontend
     secrets: inherit
 
-  build-and-push:
+  build:
+    needs: tests
     permissions:
       contents: read
       packages: write
-    runs-on: ubuntu-latest
-    needs: tests
-    if: github.event.pull_request.head.repo.full_name == github.repository
-    steps:
-      - uses: actions/checkout@v6
-      - uses: ljmerza/misc-actions/actions/docker-build-push@main
-        with:
-          image-name: ${{ env.IMAGE_NAME }}
-          build-target: production
-          registry-password: ${{ secrets.GITHUB_TOKEN }}
-          tags: |
-            type=raw,value=pr-${{ github.event.pull_request.number }}
-            type=sha,prefix=sha-
+    uses: ljmerza/misc-actions/.github/workflows/docker-ci.yml@v2
+    with:
+      image-name: ghcr.io/${{ github.repository_owner }}/my-app
+      build-target: production
+    secrets: inherit
 ```
 
 **`.github/workflows/build-and-push.yml`** (production):
@@ -432,7 +472,6 @@ name: Build and Push Image
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   release:
     types: [published]
 
@@ -440,43 +479,34 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/my-app
-
 jobs:
   tests:
     permissions:
       contents: read
-    uses: ./.github/workflows/tests.yml
+    uses: ljmerza/misc-actions/.github/workflows/fullstack-tests.yml@v2
+    with:
+      coverage-source: accounts,alarm,locks
+      codecov-backend-flags: backend
+      env-vars: |
+        SECRET_KEY=ci
+        DEBUG=True
+      frontend-working-directory: frontend
+      frontend-test-command: "npm test"
+      codecov-frontend-flags: frontend
     secrets: inherit
 
-  build-and-push:
+  build:
+    needs: tests
     permissions:
       contents: read
       packages: write
       attestations: write
       id-token: write
-    runs-on: ubuntu-latest
-    needs: tests
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: ljmerza/misc-actions/actions/docker-build-push@main
-        id: build
-        with:
-          image-name: ${{ env.IMAGE_NAME }}
-          build-target: production
-          registry-password: ${{ secrets.GITHUB_TOKEN }}
-          tags: |
-            type=ref,event=tag
-            type=sha,prefix=sha-
-            type=raw,value=main,enable={{is_default_branch}}
-            type=raw,value=latest,enable=${{ github.event_name == 'release' }}
-
-      - uses: ljmerza/misc-actions/actions/provenance-attest@main
-        with:
-          image-name: ${{ env.IMAGE_NAME }}
-          digest: ${{ steps.build.outputs.digest }}
+    uses: ljmerza/misc-actions/.github/workflows/docker-release.yml@v2
+    with:
+      image-name: ghcr.io/${{ github.repository_owner }}/my-app
+      build-target: production
+    secrets: inherit
 ```
 
 **`.github/workflows/cleanup-pr-image.yml`**:
@@ -487,18 +517,10 @@ on:
   pull_request:
     types: [closed]
 
-permissions:
-  contents: read
-  packages: write
-
 jobs:
   cleanup:
-    runs-on: ubuntu-latest
-    if: github.event.pull_request.head.repo.full_name == github.repository
-    steps:
-      - uses: ljmerza/misc-actions/actions/cleanup-pr-image@main
-        with:
-          package-name: my-app
-          tag: pr-${{ github.event.pull_request.number }}
-          token: ${{ secrets.GITHUB_TOKEN }}
+    uses: ljmerza/misc-actions/.github/workflows/cleanup-pr-image.yml@v2
+    with:
+      package-name: my-app
+    secrets: inherit
 ```

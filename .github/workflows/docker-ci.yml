@@ -1,0 +1,37 @@
+name: Docker CI
+
+on:
+  workflow_call:
+    inputs:
+      image-name:
+        description: "Full image name (e.g. ghcr.io/owner/app)"
+        required: true
+        type: string
+      build-target:
+        description: Docker build target stage (leave empty to build all stages)
+        type: string
+        default: ""
+      build-args:
+        description: Docker build arguments (multi-line)
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ljmerza/misc-actions/actions/docker-build-push@v1
+        with:
+          image-name: ${{ inputs.image-name }}
+          build-target: ${{ inputs.build-target }}
+          build-args: ${{ inputs.build-args }}
+          registry-password: ${{ secrets.GITHUB_TOKEN }}
+          tags: |
+            type=raw,value=pr-${{ github.event.pull_request.number }}
+            type=sha,prefix=sha-
