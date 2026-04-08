@@ -1,0 +1,41 @@
+name: Python Tests
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: Python version to install
+        type: string
+        default: "3.12"
+      coverage-source:
+        description: "Comma-separated packages for --cov (e.g. \"backup\" or \"alarm,accounts\")"
+        required: true
+        type: string
+      env-vars:
+        description: "Newline-separated KEY=VALUE environment variables for tests"
+        type: string
+        default: ""
+    secrets:
+      CODECOV_TOKEN:
+        description: Codecov upload token (skip upload if not provided)
+        required: false
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ljmerza/misc-actions/actions/ruff-lint@v1
+        with:
+          python-version: ${{ inputs.python-version }}
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ljmerza/misc-actions/actions/python-test@v1
+        with:
+          python-version: ${{ inputs.python-version }}
+          coverage-source: ${{ inputs.coverage-source }}
+          codecov-token: ${{ secrets.CODECOV_TOKEN }}
+          env-vars: ${{ inputs.env-vars }}
