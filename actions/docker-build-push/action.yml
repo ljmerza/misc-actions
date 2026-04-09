@@ -82,6 +82,33 @@ runs:
         images: ${{ inputs.image-name }}
         tags: ${{ inputs.tags }}
 
+    - name: Prepare build args
+      id: build-args
+      shell: bash
+      run: |
+        {
+          echo "GIT_COMMIT=${{ github.sha }}"
+          echo "GIT_COMMIT_SHORT=${GITHUB_SHA:0:7}"
+          echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "BUILD_REF=${{ github.ref_name }}"
+          echo "BUILD_NUMBER=${{ github.run_number }}"
+          echo "BUILD_REPO=${{ github.repository }}"
+        } > "$RUNNER_TEMP/auto-build-args.txt"
+
+        USER_ARGS='${{ inputs.build-args }}'
+        if [ -n "$USER_ARGS" ]; then
+          echo "$USER_ARGS" >> "$RUNNER_TEMP/auto-build-args.txt"
+        fi
+
+        # Deduplicate: last occurrence wins (user overrides auto)
+        tac "$RUNNER_TEMP/auto-build-args.txt" | awk -F= '!seen[$1]++' | tac > "$RUNNER_TEMP/final-build-args.txt"
+
+        {
+          echo 'args<<ARGS_EOF'
+          cat "$RUNNER_TEMP/final-build-args.txt"
+          echo 'ARGS_EOF'
+        } >> "$GITHUB_OUTPUT"
+
     - name: Build and push
       id: build
       uses: docker/build-push-action@v7
@@ -95,7 +122,7 @@ runs:
         push: ${{ inputs.push }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
-        build-args: ${{ inputs.build-args }}
+        build-args: ${{ steps.build-args.outputs.args }}
         cache-from: type=${{ inputs.cache-type }}
         cache-to: type=${{ inputs.cache-type }},mode=max
 

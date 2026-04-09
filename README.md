@@ -151,6 +151,19 @@ Build and push Docker image to a container registry using Buildx with multi-arch
 | `cache-type` | no | `gha` | Build cache type |
 | `build-args` | no | `""` | Docker build arguments |
 
+**Auto-injected build args:** The following build args are automatically injected into every build. User-provided `build-args` with the same key override the auto-injected values.
+
+| Build Arg | Source | Example |
+|---|---|---|
+| `GIT_COMMIT` | Full commit SHA | `abc123def456789...` |
+| `GIT_COMMIT_SHORT` | 7-char short SHA | `abc123d` |
+| `BUILD_DATE` | UTC ISO 8601 timestamp | `2026-04-09T16:30:00Z` |
+| `BUILD_REF` | Branch or tag name | `main` or `v1.2.0` |
+| `BUILD_NUMBER` | Workflow run number | `42` |
+| `BUILD_REPO` | Repository full name | `owner/repo` |
+
+> Dockerfiles that don't declare matching `ARG` declarations will silently ignore these.
+
 **Outputs:** `digest`, `tags`, `metadata`
 
 ---
