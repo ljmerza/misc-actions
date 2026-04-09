@@ -2,6 +2,23 @@
 
 Shared GitHub Actions composite actions and reusable workflows used across multiple projects.
 
+## Prerequisites
+
+Consuming repos/orgs must have **"Read and write permissions"** enabled for workflow tokens. Several workflows need write access to packages (GHCR image push/delete) and attestations.
+
+**Organization-level** (applies to all repos in the org):
+Settings → Actions → General → Workflow permissions → **Read and write permissions**
+
+Or via the GitHub API:
+```bash
+gh api orgs/{ORG}/actions/permissions/workflow \
+  --method PUT \
+  --field default_workflow_permissions=write \
+  --field can_approve_pull_request_reviews=false
+```
+
+Without this, workflows that require `packages: write`, `attestations: write`, or `id-token: write` will fail with a `startup_failure` before any jobs run.
+
 ## Image Tagging Flow
 
 Every event produces a `sha-` tag so you can always trace an image back to the exact commit.
