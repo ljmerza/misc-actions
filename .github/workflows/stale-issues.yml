@@ -1,0 +1,58 @@
+name: Stale issues (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      days-before-stale:
+        description: Days of inactivity before an issue is marked stale.
+        type: number
+        default: 23
+      days-before-close:
+        description: Days after the stale label is applied before the issue is closed.
+        type: number
+        default: 7
+      exempt-issue-labels:
+        description: Comma-separated labels that exempt an issue from being marked stale or closed.
+        type: string
+        default: 'pinned,security,help wanted,good first issue'
+      stale-issue-label:
+        description: Label applied to stale issues.
+        type: string
+        default: 'stale'
+      stale-issue-message:
+        description: Comment posted when an issue is marked stale.
+        type: string
+        default: >
+          This issue has been automatically marked as stale because it has not
+          had recent activity. It will be closed in 7 days if no further
+          activity occurs. Thank you for your contributions.
+      close-issue-message:
+        description: Comment posted when an issue is closed for being stale.
+        type: string
+        default: >
+          This issue was closed because it has been stale for 7 days with no
+          activity. Feel free to reopen if it is still relevant.
+      operations-per-run:
+        description: Maximum number of items processed in a single run.
+        type: number
+        default: 100
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/stale@v9
+        with:
+          days-before-issue-stale: ${{ inputs.days-before-stale }}
+          days-before-issue-close: ${{ inputs.days-before-close }}
+          days-before-pr-stale: -1
+          days-before-pr-close: -1
+          stale-issue-label: ${{ inputs.stale-issue-label }}
+          stale-issue-message: ${{ inputs.stale-issue-message }}
+          close-issue-message: ${{ inputs.close-issue-message }}
+          exempt-issue-labels: ${{ inputs.exempt-issue-labels }}
+          operations-per-run: ${{ inputs.operations-per-run }}
+          remove-stale-when-updated: true
+          ascending: true
