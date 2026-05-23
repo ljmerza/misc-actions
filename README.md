@@ -355,6 +355,45 @@ jobs:
 
 ---
 
+### [`stale-issues.yml`](.github/workflows/stale-issues.yml)
+
+Reusable workflow that marks inactive issues stale and closes them. Wraps
+[`actions/stale@v9`](https://github.com/actions/stale). PRs are not touched
+(`days-before-pr-stale: -1`).
+
+```yaml
+name: Close stale issues
+
+on:
+  schedule:
+    - cron: '30 1 * * *'
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  stale:
+    uses: ljmerza/misc-actions/.github/workflows/stale-issues.yml@main
+```
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `days-before-stale` | no | `23` | Days of inactivity before an issue is marked stale |
+| `days-before-close` | no | `7` | Days after the stale label is applied before the issue is closed |
+| `exempt-issue-labels` | no | `pinned,security,help wanted,good first issue` | Comma-separated labels that exempt an issue |
+| `stale-issue-label` | no | `stale` | Label applied to stale issues |
+| `stale-issue-message` | no | _(see workflow)_ | Comment posted when an issue is marked stale |
+| `close-issue-message` | no | _(see workflow)_ | Comment posted when an issue is closed for being stale |
+| `operations-per-run` | no | `100` | Maximum number of items processed per run |
+
+> Default policy: 23 days inactive → `stale` label + warning comment → 7 more
+> days inactive → closed. Total 30 days from last activity to closed. A new
+> comment or update on the issue removes the `stale` label and resets the
+> clock.
+
+---
+
 ## Full Workflow Examples
 
 ### Python/Django Project (backend only)
