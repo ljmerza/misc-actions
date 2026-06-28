@@ -6,7 +6,7 @@ on:
       days-before-stale:
         description: Days of inactivity before an issue is marked stale.
         type: number
-        default: 23
+        default: 60
       days-before-close:
         description: Days after the stale label is applied before the issue is closed.
         type: number
