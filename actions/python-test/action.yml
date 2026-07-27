@@ -11,8 +11,32 @@ inputs:
     required: false
     default: "."
   coverage-source:
-    description: Comma-separated packages for --cov (e.g. "backup" or "alarm,accounts,locks")
-    required: true
+    description: >-
+      Comma-separated packages for --cov (e.g. "backup" or "alarm,accounts,locks").
+      Leave empty to run pytest without coverage, which also skips the Codecov upload.
+    required: false
+    default: ""
+  requirements-file:
+    description: >-
+      Install from this pip requirements file instead of `uv sync --frozen --group dev`.
+      For repos with no pyproject.toml/uv.lock. Path is relative to working-directory.
+    required: false
+    default: ""
+  extra-packages:
+    description: >-
+      Extra packages installed after the main install, whitespace or newline separated
+      (e.g. an optional test plugin that must not be a declared dependency).
+    required: false
+    default: ""
+  prerelease:
+    description: >-
+      uv pre-release strategy for the requirements-file and extra-packages installs:
+      disallow | allow | if-necessary | explicit | if-necessary-or-explicit.
+      The default matches pip closely enough for normal use. Set to "allow" when a
+      dependency pins a pre-release transitively (e.g. homeassistant pinning
+      aiohasupervisor==0.2.2b5), which the default rejects.
+    required: false
+    default: "if-necessary-or-explicit"
   codecov-token:
     description: Codecov upload token (skip upload if empty)
     required: false
@@ -41,12 +65,30 @@ runs:
     - name: Install dependencies
       shell: bash
       working-directory: ${{ inputs.working-directory }}
-      run: uv sync --frozen --group dev
+      run: |
+        set -euo pipefail
+        PRERELEASE="--prerelease=$PRERELEASE_STRATEGY"
+        if [ -n "$REQUIREMENTS_FILE" ]; then
+          # No pyproject/uv.lock to sync from — build a plain venv instead.
+          uv venv --python "$PYTHON_VERSION"
+          uv pip install $PRERELEASE -r "$REQUIREMENTS_FILE"
+        else
+          uv sync --frozen --group dev
+        fi
+        if [ -n "$EXTRA_PACKAGES" ]; then
+          uv pip install $PRERELEASE $EXTRA_PACKAGES
+        fi
+      env:
+        PYTHON_VERSION: ${{ inputs.python-version }}
+        REQUIREMENTS_FILE: ${{ inputs.requirements-file }}
+        EXTRA_PACKAGES: ${{ inputs.extra-packages }}
+        PRERELEASE_STRATEGY: ${{ inputs.prerelease }}
 
-    - name: Run tests with coverage
+    - name: Run tests
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
+        set -euo pipefail
         # Export user-provided environment variables
         if [ -n "$ENV_VARS" ]; then
           while IFS= read -r line; do
@@ -56,20 +98,32 @@ runs:
           done <<< "$ENV_VARS"
         fi
 
-        # Build --cov flags from comma-separated source list
+        # Build --cov flags from comma-separated source list. Empty
+        # coverage-source runs a plain pytest (repos with no coverage setup).
         COV_FLAGS=""
-        IFS=',' read -ra SOURCES <<< "${{ inputs.coverage-source }}"
-        for src in "${SOURCES[@]}"; do
-          src=$(echo "$src" | xargs)
-          COV_FLAGS="$COV_FLAGS --cov=$src"
-        done
+        if [ -n "$COVERAGE_SOURCE" ]; then
+          IFS=',' read -ra SOURCES <<< "$COVERAGE_SOURCE"
+          for src in "${SOURCES[@]}"; do
+            src=$(echo "$src" | xargs)
+            COV_FLAGS="$COV_FLAGS --cov=$src"
+          done
+          COV_FLAGS="$COV_FLAGS --cov-report=xml --cov-report=term-missing"
+        fi
 
-        uv run pytest $COV_FLAGS --cov-report=xml --cov-report=term-missing
+        # uv run resolves against the project; the requirements path has no
+        # project to resolve, so call the venv's pytest directly.
+        if [ -n "$REQUIREMENTS_FILE" ]; then
+          .venv/bin/pytest $COV_FLAGS
+        else
+          uv run pytest $COV_FLAGS
+        fi
       env:
         ENV_VARS: ${{ inputs.env-vars }}
+        COVERAGE_SOURCE: ${{ inputs.coverage-source }}
+        REQUIREMENTS_FILE: ${{ inputs.requirements-file }}
 
     - name: Upload coverage to Codecov
-      if: always() && inputs.codecov-token != ''
+      if: always() && inputs.codecov-token != '' && inputs.coverage-source != ''
       uses: codecov/codecov-action@v6
       with:
         files: ${{ inputs.working-directory }}/coverage.xml
