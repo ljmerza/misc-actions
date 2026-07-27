@@ -73,7 +73,7 @@ Run ESLint via npm for frontend projects.
 
 ### [`python-test`](actions/python-test/action.yml)
 
-Run pytest with coverage via uv and optionally upload to Codecov.
+Run pytest via uv, optionally with coverage and a Codecov upload.
 
 ```yaml
 - uses: ljmerza/misc-actions/actions/python-test@main
@@ -89,12 +89,41 @@ Run pytest with coverage via uv and optionally upload to Codecov.
 |-------|----------|---------|-------------|
 | `python-version` | no | `3.12` | Python version |
 | `working-directory` | no | `.` | Project root |
-| `coverage-source` | **yes** | — | Comma-separated packages for `--cov=` |
+| `coverage-source` | no | `""` | Comma-separated packages for `--cov=`. Empty runs plain pytest and skips the Codecov upload |
+| `requirements-file` | no | `""` | Install from this pip requirements file instead of `uv sync` |
+| `extra-packages` | no | `""` | Extra packages installed after the main install |
+| `prerelease` | no | `if-necessary-or-explicit` | uv pre-release strategy for the two installs above |
 | `codecov-token` | no | `""` | Codecov token (skip upload if empty) |
 | `codecov-flags` | no | `""` | Codecov flags (e.g. `backend`) |
 | `env-vars` | no | `""` | Newline-separated `KEY=VALUE` env vars for tests |
 
-> Requires `[dependency-groups] dev` in `pyproject.toml` with pytest and pytest-cov as dependencies.
+> By default, requires `[dependency-groups] dev` in `pyproject.toml` with pytest and pytest-cov as dependencies.
+
+#### Repos without a pyproject / uv.lock
+
+`requirements-file` builds a plain venv and installs from pip instead of syncing a
+project. `extra-packages` layers on packages that must not be declared dependencies —
+useful for running the same suite twice under different plugin sets:
+
+```yaml
+# Fast signal: exactly the declared test dependencies.
+- uses: ljmerza/misc-actions/actions/python-test@main
+  with:
+    python-version: "3.13"
+    requirements-file: tests/requirements-test.txt
+
+# Same suite, plus a plugin whose autouse fixtures catch extra defects.
+- uses: ljmerza/misc-actions/actions/python-test@main
+  with:
+    python-version: "3.13"
+    requirements-file: tests/requirements-test.txt
+    extra-packages: pytest-homeassistant-custom-component==0.13.205
+    prerelease: allow   # homeassistant pins aiohasupervisor==0.2.2b5
+```
+
+> `uv pip` rejects pre-releases by default, including a transitive exact pin like
+> `aiohasupervisor==0.2.2b5`, where plain `pip` would install it. Set `prerelease: allow`
+> on the job that needs it rather than loosening the default for every consumer.
 
 ---
 
