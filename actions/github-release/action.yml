@@ -1,0 +1,85 @@
+name: GitHub Release
+description: Create a GitHub Release for an existing tag, attaching a previously uploaded build artifact
+
+inputs:
+  tag:
+    description: Tag to release
+    required: true
+  title:
+    description: Release title (defaults to the tag itself)
+    required: false
+    default: ""
+  artifact-name:
+    description: Build artifact to download and attach. Empty means release without assets.
+    required: false
+    default: "dist"
+  artifact-path:
+    description: Directory to download the artifact into
+    required: false
+    default: "dist"
+  generate-notes:
+    description: Let GitHub write the release notes from the commits and PRs since the last release
+    required: false
+    default: "true"
+  verify-tag:
+    description: Abort rather than create the tag if it does not already exist
+    required: false
+    default: "true"
+  prerelease:
+    description: Mark the release as a prerelease
+    required: false
+    default: "false"
+  github-token:
+    description: Token with contents:write, used by the gh CLI
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Download the build artifact
+      if: inputs.artifact-name != ''
+      uses: actions/download-artifact@v8
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ inputs.artifact-path }}
+
+    - name: Create release
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        TAG: ${{ inputs.tag }}
+        TITLE: ${{ inputs.title }}
+        ARTIFACT_NAME: ${{ inputs.artifact-name }}
+        ARTIFACT_PATH: ${{ inputs.artifact-path }}
+        GENERATE_NOTES: ${{ inputs.generate-notes }}
+        VERIFY_TAG: ${{ inputs.verify-tag }}
+        PRERELEASE: ${{ inputs.prerelease }}
+      run: |
+        ARGS=()
+        if [ -n "$TITLE" ]; then
+          ARGS+=(--title "$TITLE")
+        fi
+        if [ "$GENERATE_NOTES" = "true" ]; then
+          ARGS+=(--generate-notes)
+        fi
+        if [ "$VERIFY_TAG" = "true" ]; then
+          ARGS+=(--verify-tag)
+        fi
+        if [ "$PRERELEASE" = "true" ]; then
+          ARGS+=(--prerelease)
+        fi
+
+        # Expand the downloaded files explicitly: an unmatched glob would be
+        # passed through literally and gh would fail on a nonexistent asset.
+        FILES=()
+        if [ -n "$ARTIFACT_NAME" ]; then
+          shopt -s nullglob
+          FILES=("$ARTIFACT_PATH"/*)
+          shopt -u nullglob
+          if [ ${#FILES[@]} -eq 0 ]; then
+            echo "::error::artifact '$ARTIFACT_NAME' downloaded no files into $ARTIFACT_PATH/"
+            exit 1
+          fi
+        fi
+
+        gh release create "$TAG" "${ARGS[@]}" "${FILES[@]}"

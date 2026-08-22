@@ -127,6 +127,31 @@ useful for running the same suite twice under different plugin sets:
 
 ---
 
+### [`python-build`](actions/python-build/action.yml)
+
+Build an sdist and wheel with uv, optionally checking the version in `pyproject.toml` against the release tag first, and upload the result as an artifact.
+
+```yaml
+- uses: ljmerza/misc-actions/actions/python-build@main
+  with:
+    expected-version: ${{ github.ref_name }}
+```
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `python-version` | no | `3.12` | Python version |
+| `working-directory` | no | `.` | Project root |
+| `expected-version` | no | `""` | Version the build must match (`v1.0.0` or `1.0.0`); skips the check if empty |
+| `artifact-name` | no | `dist` | Name of the uploaded dist artifact |
+
+| Output | Description |
+|--------|-------------|
+| `version` | Version read from `pyproject.toml` |
+
+> A leading `v` is stripped before comparing, so the tag `v1.0.0` matches `version = "1.0.0"`.
+
+---
+
 ### [`frontend-test`](actions/frontend-test/action.yml)
 
 Run frontend tests via npm and optionally upload coverage to Codecov.
@@ -239,6 +264,33 @@ Delete a PR-tagged container image from GHCR.
 
 ---
 
+### [`github-release`](actions/github-release/action.yml)
+
+Create a GitHub Release for an existing tag, attaching a build artifact uploaded by an earlier job.
+
+```yaml
+- uses: ljmerza/misc-actions/actions/github-release@main
+  with:
+    tag: ${{ github.ref_name }}
+    title: my-app ${{ github.ref_name }}
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `tag` | **yes** | — | Tag to release |
+| `title` | no | `""` | Release title (defaults to the tag) |
+| `artifact-name` | no | `dist` | Artifact to download and attach; empty releases without assets |
+| `artifact-path` | no | `dist` | Directory to download the artifact into |
+| `generate-notes` | no | `true` | Let GitHub write the notes from commits and PRs |
+| `verify-tag` | no | `true` | Abort rather than create the tag if it does not already exist |
+| `prerelease` | no | `false` | Mark the release as a prerelease |
+| `github-token` | **yes** | — | Token with `contents: write` |
+
+> The calling job must declare `contents: write`.
+
+---
+
 ## Reusable Workflows
 
 These workflows compose the actions above into complete CI/CD pipelines. Consuming repos only need thin wrapper workflows.
@@ -269,6 +321,41 @@ jobs:
 | Secret | Required | Description |
 |--------|----------|-------------|
 | `CODECOV_TOKEN` | no | Codecov upload token |
+
+---
+
+### [`python-release.yml`](.github/workflows/python-release.yml)
+
+Reusable release workflow for Python packages: build, publish to PyPI via OIDC trusted publishing, then cut a GitHub Release with the artifacts attached. No PyPI API token is stored anywhere.
+
+`publish-pypi` -> `github-release`, so a tag whose PyPI publish failed never becomes a release.
+
+```yaml
+jobs:
+  release:
+    needs: tests
+    permissions:
+      contents: write
+      id-token: write
+    uses: ljmerza/misc-actions/.github/workflows/python-release.yml@v2.2.0
+    with:
+      package-name: my-package
+    secrets: inherit
+```
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `package-name` | **yes** | — | PyPI project name; used for the environment URL and the default release title |
+| `python-version` | no | `3.12` | Python version to build with |
+| `working-directory` | no | `.` | Project root |
+| `environment` | no | `pypi` | Deployment environment holding the PyPI trusted-publisher configuration |
+| `verify-version` | no | `true` | Fail if the tag does not match the version in `pyproject.toml` |
+| `release-title` | no | `""` | Release title (defaults to `<package-name> <tag>`) |
+| `prerelease` | no | `false` | Mark the GitHub Release as a prerelease |
+
+> **Note:** The calling job must declare `id-token: write` and `contents: write`, and the calling repo must define the deployment environment named by `environment` (default `pypi`) with a PyPI trusted publisher configured for the **calling** repo's workflow file.
+>
+> `verify-version` compares the tag in `github.ref_name`, so a `workflow_dispatch` run from a branch fails the check. Dispatch from a tag, or pass `verify-version: false`.
 
 ---
 
