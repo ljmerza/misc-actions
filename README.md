@@ -324,38 +324,44 @@ jobs:
 
 ---
 
-### [`python-release.yml`](.github/workflows/python-release.yml)
+### Python releases
 
-Reusable release workflow for Python packages: build, publish to PyPI via OIDC trusted publishing, then cut a GitHub Release with the artifacts attached. No PyPI API token is stored anywhere.
+There is deliberately **no** reusable release workflow here. PyPI's trusted
+publishing matches the OIDC `job_workflow_ref` claim, which names the workflow
+that actually ran the job. Call a reusable workflow and that claim points at
+this repository instead of yours, and the exchange fails with
+`invalid-publisher`. PyPI
+[does not support reusable workflows](https://docs.pypi.org/trusted-publishers/troubleshooting/#reusable-workflows-on-github)
+yet.
 
-`publish-pypi` -> `github-release`, so a tag whose PyPI publish failed never becomes a release.
+Composite actions do not have this problem: they run inside your job, so the
+claim keeps pointing at your workflow file. Put the publish job in your own
+repo and use [`python-build`](actions/python-build/action.yml) for the build:
 
 ```yaml
 jobs:
-  release:
+  publish-pypi:
     needs: tests
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/my-package
     permissions:
-      contents: write
       id-token: write
-    uses: ljmerza/misc-actions/.github/workflows/python-release.yml@v2.2.0
-    with:
-      package-name: my-package
-    secrets: inherit
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ljmerza/misc-actions/actions/python-build@v2.2.0
+        with:
+          expected-version: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+      - uses: pypa/gh-action-pypi-publish@release/v1
 ```
 
-| Input | Required | Default | Description |
-|-------|----------|---------|-------------|
-| `package-name` | **yes** | — | PyPI project name; used for the environment URL and the default release title |
-| `python-version` | no | `3.12` | Python version to build with |
-| `working-directory` | no | `.` | Project root |
-| `environment` | no | `pypi` | Deployment environment holding the PyPI trusted-publisher configuration |
-| `verify-version` | no | `true` | Fail if the tag does not match the version in `pyproject.toml` |
-| `release-title` | no | `""` | Release title (defaults to `<package-name> <tag>`) |
-| `prerelease` | no | `false` | Mark the GitHub Release as a prerelease |
+Configure the trusted publisher on PyPI against **your** repo and the filename
+of **your** workflow, plus the environment named above.
 
-> **Note:** The calling job must declare `id-token: write` and `contents: write`, and the calling repo must define the deployment environment named by `environment` (default `pypi`) with a PyPI trusted publisher configured for the **calling** repo's workflow file.
->
-> `verify-version` compares the tag in `github.ref_name`, so a `workflow_dispatch` run from a branch fails the check. Dispatch from a tag, or pass `verify-version: false`.
+To attach the built artifacts to a GitHub Release afterwards, add a second job
+using [`github-release`](actions/github-release/action.yml), or cut the release
+outside CI.
 
 ---
 
