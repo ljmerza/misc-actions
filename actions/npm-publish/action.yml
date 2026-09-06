@@ -94,31 +94,41 @@ runs:
           echo "$NAME@$VERSION is not on the registry yet"
         fi
 
-    - name: Publish
+    - name: Assemble the publish arguments
+      id: args
       if: steps.check.outputs.published != 'true'
       shell: bash
-      working-directory: ${{ inputs.working-directory }}
       env:
-        # Empty when using OIDC. setup-node writes an .npmrc that reads this,
-        # and npm falls through to the OIDC exchange when it resolves to nothing.
-        NODE_AUTH_TOKEN: ${{ inputs.token }}
         DIST_TAG: ${{ inputs.dist-tag }}
         ACCESS: ${{ inputs.access }}
         DRY_RUN: ${{ inputs.dry-run }}
         PROVENANCE: ${{ inputs.provenance }}
       run: |
-        ARGS=(--tag "$DIST_TAG" --access "$ACCESS")
+        ARGS="--tag $DIST_TAG --access $ACCESS"
         if [ "$DRY_RUN" = "true" ]; then
-          ARGS+=(--dry-run)
+          ARGS="$ARGS --dry-run"
         fi
         if [ "$PROVENANCE" = "true" ]; then
-          ARGS+=(--provenance)
+          ARGS="$ARGS --provenance"
         fi
-        if [ -z "$NODE_AUTH_TOKEN" ]; then
-          echo "publishing with trusted publishing (OIDC)"
-        else
-          echo "publishing with a token"
-        fi
-        # Provenance is generated automatically for public repos publishing via
-        # OIDC, so --provenance is deliberately not passed here.
-        npm publish "${ARGS[@]}"
+        echo "args=$ARGS" >> "$GITHUB_OUTPUT"
+        echo "npm publish $ARGS"
+
+    # Two steps, because the difference is whether NODE_AUTH_TOKEN exists at all.
+    # setup-node writes an .npmrc line reading //registry/:_authToken=${NODE_AUTH_TOKEN};
+    # defining that variable as an empty string is not the same as leaving it
+    # unset -- npm treats it as a configured-but-empty credential and fails with
+    # ENEEDAUTH before it ever attempts the OIDC exchange.
+    - name: Publish with trusted publishing (OIDC)
+      if: steps.check.outputs.published != 'true' && inputs.token == ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: npm publish ${{ steps.args.outputs.args }}
+
+    - name: Publish with a token
+      if: steps.check.outputs.published != 'true' && inputs.token != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        NODE_AUTH_TOKEN: ${{ inputs.token }}
+      run: npm publish ${{ steps.args.outputs.args }}
