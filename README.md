@@ -367,6 +367,11 @@ Create a GitHub Release for an existing tag, attaching a build artifact uploaded
 
 > The calling job must declare `contents: write`.
 
+> The job also needs an `actions/checkout` step when `verify-tag` is true (the
+> default). `gh release create --verify-tag` shells out to `git`, so without a
+> checkout it fails with `fatal: not a git repository` — which reads like a gh
+> problem rather than a missing step.
+
 ---
 
 ## Reusable Workflows
