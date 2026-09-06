@@ -1,0 +1,103 @@
+name: Node Tests
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: Node.js version to install
+        type: string
+        default: "22"
+      working-directory:
+        description: Package root directory
+        type: string
+        default: "."
+      lint:
+        description: Run `npm run lint` via the eslint action
+        type: boolean
+        default: true
+      typecheck:
+        description: Run `npm run typecheck` in the lint job, reusing its install
+        type: boolean
+        default: true
+      test-command:
+        description: Test command to run
+        type: string
+        default: "npm test"
+      build:
+        description: Run a build to prove the package still compiles
+        type: boolean
+        default: true
+      build-command:
+        description: Build command to run when `build` is enabled
+        type: string
+        default: "npm run build"
+      codecov-flags:
+        description: Codecov flags for the coverage upload
+        type: string
+        default: "frontend"
+      coverage-file:
+        description: Coverage output path relative to the working directory
+        type: string
+        default: "coverage/coverage-final.json"
+    secrets:
+      CODECOV_TOKEN:
+        description: Codecov upload token (skip upload if not provided)
+        required: false
+
+jobs:
+  lint:
+    if: inputs.lint || inputs.typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - if: inputs.lint
+        uses: ljmerza/misc-actions/actions/eslint@v2
+        with:
+          node-version: ${{ inputs.node-version }}
+          working-directory: ${{ inputs.working-directory }}
+
+      # When lint ran, the eslint action already installed Node and the
+      # dependencies in this job; set them up here only if it did not.
+      - if: inputs.typecheck && !inputs.lint
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+
+      - if: inputs.typecheck && !inputs.lint
+        working-directory: ${{ inputs.working-directory }}
+        shell: bash
+        run: npm ci
+
+      - if: inputs.typecheck
+        working-directory: ${{ inputs.working-directory }}
+        shell: bash
+        run: npm run typecheck
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ljmerza/misc-actions/actions/frontend-test@v2
+        with:
+          node-version: ${{ inputs.node-version }}
+          working-directory: ${{ inputs.working-directory }}
+          test-command: ${{ inputs.test-command }}
+          codecov-token: ${{ secrets.CODECOV_TOKEN }}
+          codecov-flags: ${{ inputs.codecov-flags }}
+          coverage-file: ${{ inputs.coverage-file }}
+
+  build:
+    if: inputs.build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ljmerza/misc-actions/actions/npm-build@v2
+        with:
+          node-version: ${{ inputs.node-version }}
+          working-directory: ${{ inputs.working-directory }}
+          build-command: ${{ inputs.build-command }}
+          # Proves the tarball packs cleanly on every PR without keeping it.
+          artifact-name: ""

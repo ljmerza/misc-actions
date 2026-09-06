@@ -1,0 +1,113 @@
+name: npm Publish
+description: Publish a package to npm using trusted publishing (OIDC) or a classic token
+
+inputs:
+  node-version:
+    description: Node.js version to install. Trusted publishing needs >= 22.14.0; 24 ships an npm new enough on its own.
+    required: false
+    default: "24"
+  working-directory:
+    description: Package root directory
+    required: false
+    default: "."
+  registry-url:
+    description: Registry to publish to
+    required: false
+    default: "https://registry.npmjs.org"
+  dist-tag:
+    description: npm dist-tag to publish under
+    required: false
+    default: "latest"
+  access:
+    description: Package access. Scoped packages default to restricted on npm, so this stays public unless overridden.
+    required: false
+    default: "public"
+  dry-run:
+    description: Run publish with --dry-run and push nothing
+    required: false
+    default: "false"
+  skip-if-published:
+    description: >-
+      Exit successfully when this exact name@version is already on the registry.
+      Needed when a workflow can fire twice for one version, e.g. a tag push and
+      the `release: published` event for a release cut from that same tag.
+    required: false
+    default: "true"
+  token:
+    description: npm automation token. Leave empty to use trusted publishing (OIDC), which needs id-token:write on the calling job.
+    required: false
+    default: ""
+
+outputs:
+  published:
+    description: '"true" when this run pushed the version, "false" when it was already on the registry'
+    value: ${{ steps.check.outputs.published == 'true' && 'false' || 'true' }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version: ${{ inputs.node-version }}
+        registry-url: ${{ inputs.registry-url }}
+        # A poisoned cache must not be able to reach a published artifact.
+        package-manager-cache: false
+
+    - name: Ensure the npm CLI supports trusted publishing
+      shell: bash
+      run: |
+        # OIDC exchange landed in npm 11.5.1. Older CLIs fail with an
+        # authentication error that does not mention the version at all.
+        REQUIRED="11.5.1"
+        CURRENT=$(npm --version)
+        LOWEST=$(printf '%s\n%s\n' "$REQUIRED" "$CURRENT" | sort -V | head -n1)
+        if [ "$CURRENT" != "$REQUIRED" ] && [ "$LOWEST" = "$CURRENT" ]; then
+          echo "npm $CURRENT is older than $REQUIRED, upgrading"
+          npm install -g npm@latest
+          echo "npm is now $(npm --version)"
+        else
+          echo "npm $CURRENT satisfies >= $REQUIRED"
+        fi
+
+    - name: Check whether this version is already published
+      id: check
+      if: inputs.skip-if-published == 'true' && inputs.dry-run != 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        NAME=$(node -p "require('./package.json').name")
+        VERSION=$(node -p "require('./package.json').version")
+        # `npm view` exits non-zero with E404 when the version does not exist.
+        if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+          echo "published=true" >> "$GITHUB_OUTPUT"
+          echo "::notice::$NAME@$VERSION is already on the registry, skipping publish"
+        else
+          echo "published=false" >> "$GITHUB_OUTPUT"
+          echo "$NAME@$VERSION is not on the registry yet"
+        fi
+
+    - name: Publish
+      if: steps.check.outputs.published != 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        # Empty when using OIDC. setup-node writes an .npmrc that reads this,
+        # and npm falls through to the OIDC exchange when it resolves to nothing.
+        NODE_AUTH_TOKEN: ${{ inputs.token }}
+        DIST_TAG: ${{ inputs.dist-tag }}
+        ACCESS: ${{ inputs.access }}
+        DRY_RUN: ${{ inputs.dry-run }}
+      run: |
+        ARGS=(--tag "$DIST_TAG" --access "$ACCESS")
+        if [ "$DRY_RUN" = "true" ]; then
+          ARGS+=(--dry-run)
+        fi
+        if [ -z "$NODE_AUTH_TOKEN" ]; then
+          echo "publishing with trusted publishing (OIDC)"
+        else
+          echo "publishing with a token"
+        fi
+        # Provenance is generated automatically for public repos publishing via
+        # OIDC, so --provenance is deliberately not passed here.
+        npm publish "${ARGS[@]}"

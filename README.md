@@ -175,6 +175,78 @@ Run frontend tests via npm and optionally upload coverage to Codecov.
 
 ---
 
+### [`npm-build`](actions/npm-build/action.yml)
+
+Install with `npm ci`, optionally check the version in `package.json` against the release tag, build, and upload the packed tarball as an artifact.
+
+```yaml
+- uses: ljmerza/misc-actions/actions/npm-build@v2
+  id: build
+  with:
+    expected-version: ${{ github.ref_name }}
+    cache: "false"
+```
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `node-version` | no | `22` | Node.js version |
+| `working-directory` | no | `.` | Package root |
+| `expected-version` | no | `""` | Version the build must match (`v1.0.0` or `1.0.0`); skips the check if empty |
+| `build-command` | no | `npm run build` | Build command |
+| `cache` | no | `true` | Cache npm downloads. Set `false` for release builds |
+| `pack` | no | `true` | Run `npm pack` after the build |
+| `artifact-name` | no | `npm-package` | Uploaded tarball artifact; empty packs without uploading |
+
+| Output | Description |
+|--------|-------------|
+| `version` | Version read from `package.json` |
+| `tarball` | Filename of the packed tarball, empty when packing was skipped |
+
+> A leading `v` is stripped before comparing, so the tag `v1.0.0` matches `"version": "1.0.0"`.
+
+> Packing on every PR is the cheapest way to catch a `files`/`exports` mistake — a missing `dist` entry or an `exports` path that points at a file the build no longer emits fails here rather than at publish time.
+
+---
+
+### [`npm-publish`](actions/npm-publish/action.yml)
+
+Publish a package to npm using trusted publishing (OIDC) or a classic automation token.
+
+> **Note:** For OIDC the calling job must declare `id-token: write`.
+
+```yaml
+- uses: ljmerza/misc-actions/actions/npm-publish@v2
+```
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `node-version` | no | `24` | Node.js version. Trusted publishing needs >= 22.14.0 |
+| `working-directory` | no | `.` | Package root |
+| `registry-url` | no | `https://registry.npmjs.org` | Registry to publish to |
+| `dist-tag` | no | `latest` | npm dist-tag |
+| `access` | no | `public` | Package access; scoped packages default to restricted on npm |
+| `dry-run` | no | `false` | Publish with `--dry-run` and push nothing |
+| `skip-if-published` | no | `true` | Exit successfully if this exact `name@version` is already on the registry |
+| `token` | no | `""` | npm automation token. Empty uses trusted publishing (OIDC) |
+
+| Output | Description |
+|--------|-------------|
+| `published` | `"true"` when this run pushed the version, `"false"` when it was already there |
+
+The action upgrades the npm CLI when the runner's is older than 11.5.1, the first
+version that performs the OIDC exchange. Older CLIs fail with a plain
+authentication error that never mentions the version.
+
+Provenance is generated automatically for public repos publishing over OIDC, so
+`--provenance` is deliberately not passed.
+
+`skip-if-published` exists because a release workflow commonly listens to both
+`push: tags` and `release: published`. Cutting a GitHub release from a fresh tag
+fires both, and the second publish would otherwise fail with
+`EPUBLISHCONFLICT`. With the guard, whichever runs second is a no-op.
+
+---
+
 ### [`docker-build-push`](actions/docker-build-push/action.yml)
 
 Build and push Docker image to a container registry using Buildx with multi-arch support.
@@ -400,6 +472,104 @@ jobs:
 | Secret | Required | Description |
 |--------|----------|-------------|
 | `CODECOV_TOKEN` | no | Codecov upload token |
+
+---
+
+### [`node-tests.yml`](.github/workflows/node-tests.yml)
+
+Reusable test workflow for Node/TypeScript packages (eslint + typecheck + tests + a build that proves the tarball still packs).
+
+```yaml
+jobs:
+  tests:
+    uses: ljmerza/misc-actions/.github/workflows/node-tests.yml@v2
+    with:
+      node-version: "22"
+      test-command: "npm run test:coverage"
+    secrets: inherit
+```
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `node-version` | no | `22` | Node.js version |
+| `working-directory` | no | `.` | Package root |
+| `lint` | no | `true` | Run `npm run lint` via the eslint action |
+| `typecheck` | no | `true` | Run `npm run typecheck` |
+| `test-command` | no | `npm test` | Test command |
+| `build` | no | `true` | Run a build to prove the package still compiles and packs |
+| `build-command` | no | `npm run build` | Build command when `build` is enabled |
+| `codecov-flags` | no | `frontend` | Codecov flags |
+| `coverage-file` | no | `coverage/coverage-final.json` | Coverage output path |
+
+| Secret | Required | Description |
+|--------|----------|-------------|
+| `CODECOV_TOKEN` | no | Codecov upload token |
+
+> `lint` and `typecheck` share one job so the `npm ci` is paid once. Tests and the build run as their own jobs, in parallel.
+
+---
+
+### npm releases
+
+As with PyPI, there is deliberately **no** reusable release workflow here — but
+for the opposite reason. PyPI matches the OIDC `job_workflow_ref` claim, which
+names the workflow that actually ran the job. npm instead validates the
+**entry-point** workflow: per npm's docs, when `workflow_call` is used,
+"validation checks the calling workflow's name instead of the workflow that
+actually contains the publish command, which can cause configuration
+mismatches."
+
+So a reusable workflow can be made to work on npm, but only by registering the
+*caller's* filename as the trusted publisher — a coupling that silently breaks
+the moment someone renames the wrapper. Composite actions have no such problem:
+they run inside your job, so the workflow filename npm sees is the one you
+registered.
+
+Put the publish job in your own repo and use
+[`npm-build`](actions/npm-build/action.yml) and
+[`npm-publish`](actions/npm-publish/action.yml):
+
+```yaml
+on:
+  push:
+    tags: ["v*"]
+  release:
+    types: [published]
+
+jobs:
+  publish-npm:
+    needs: tests
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write    # required for the OIDC exchange
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # A `release: published` run checks out the default branch otherwise.
+          ref: ${{ github.event.release.tag_name || github.ref_name }}
+      - uses: ljmerza/misc-actions/actions/npm-build@v2
+        with:
+          expected-version: ${{ github.event.release.tag_name || github.ref_name }}
+          cache: "false"
+      - uses: ljmerza/misc-actions/actions/npm-publish@v2
+```
+
+Listening to both events means you can either push a tag or click "Publish
+release" in the UI. A release cut from a brand-new tag fires *both*, which is
+safe: `npm-publish` defaults to `skip-if-published: true`, so the second run
+finds the version already on the registry and exits cleanly. Guard any
+`github-release` job with `if: github.event_name == 'push'` so it does not try
+to create a release that already exists.
+
+On npmjs.com, configure the trusted publisher against **your** repo and the
+filename of **your** workflow (the filename only, not a path). Requirements:
+`id-token: write`, npm CLI >= 11.5.1, and Node >= 22.14.0 — `npm-publish`
+defaults to Node 24 and upgrades npm if the runner's is older.
+
+To attach the built tarball to a GitHub Release afterwards, add a job using
+[`github-release`](actions/github-release/action.yml) with
+`artifact-name: npm-package`.
 
 ---
 

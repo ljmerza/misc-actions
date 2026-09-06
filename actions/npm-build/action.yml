@@ -1,0 +1,110 @@
+name: npm Build
+description: Install with npm ci, optionally check the version against a release tag, build, and upload the packed tarball
+
+inputs:
+  node-version:
+    description: Node.js version to install
+    required: false
+    default: "22"
+  working-directory:
+    description: Package root directory
+    required: false
+    default: "."
+  expected-version:
+    description: 'Version the build must match, tag form or bare (e.g. "v1.0.0" or "1.0.0"). Skips the check if empty.'
+    required: false
+    default: ""
+  build-command:
+    description: Build command to run
+    required: false
+    default: "npm run build"
+  cache:
+    description: Cache npm downloads. Set to false for release builds so a poisoned cache cannot reach a published artifact.
+    required: false
+    default: "true"
+  pack:
+    description: Run `npm pack` after the build. Cheap, and catches a broken `files`/`exports` list before publish does.
+    required: false
+    default: "true"
+  artifact-name:
+    description: Name of the uploaded tarball artifact. Empty packs without uploading.
+    required: false
+    default: "npm-package"
+
+outputs:
+  version:
+    description: Version read from package.json
+    value: ${{ steps.version.outputs.version }}
+  tarball:
+    description: Filename of the packed tarball, empty when packing was skipped
+    value: ${{ steps.pack.outputs.tarball }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: ${{ inputs.cache == 'true' && 'npm' || '' }}
+        cache-dependency-path: ${{ inputs.cache == 'true' && format('{0}/package-lock.json', inputs.working-directory) || '' }}
+
+    - name: Read the version from package.json
+      id: version
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        VERSION=$(node -p "require('./package.json').version || ''")
+        if [ -z "$VERSION" ]; then
+          echo "::error::no \"version\" field found in package.json"
+          exit 1
+        fi
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+        echo "package.json version: $VERSION"
+
+    - name: Check the version matches the release tag
+      if: inputs.expected-version != ''
+      shell: bash
+      env:
+        EXPECTED: ${{ inputs.expected-version }}
+        PACKAGE: ${{ steps.version.outputs.version }}
+      run: |
+        # Tags are conventionally v-prefixed; package.json versions never are.
+        if [ "${EXPECTED#v}" != "$PACKAGE" ]; then
+          echo "::error::$EXPECTED does not match package.json version $PACKAGE"
+          exit 1
+        fi
+        echo "building version $PACKAGE"
+
+    - name: Install dependencies
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: npm ci
+
+    - name: Build
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: ${{ inputs.build-command }}
+
+    - name: Pack
+      id: pack
+      if: inputs.pack == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        # --json keeps the filename parseable even when npm prints notices.
+        TARBALL=$(npm pack --json | node -p "JSON.parse(require('fs').readFileSync(0,'utf8'))[0].filename")
+        if [ ! -f "$TARBALL" ]; then
+          echo "::error::npm pack reported $TARBALL but the file does not exist"
+          exit 1
+        fi
+        echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
+        echo "packed $TARBALL"
+
+    - name: Upload the tarball
+      if: inputs.pack == 'true' && inputs.artifact-name != ''
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ inputs.working-directory }}/${{ steps.pack.outputs.tarball }}
+        if-no-files-found: error
