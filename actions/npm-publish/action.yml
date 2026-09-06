@@ -26,6 +26,13 @@ inputs:
     description: Run publish with --dry-run and push nothing
     required: false
     default: "false"
+  provenance:
+    description: >-
+      Pass --provenance. npm documents provenance as automatic over OIDC, but that
+      is disputed in practice and the flag is a no-op when it already applies.
+      Requires a public package built from a public repo; set false otherwise.
+    required: false
+    default: "true"
   skip-if-published:
     description: >-
       Exit successfully when this exact name@version is already on the registry.
@@ -98,10 +105,14 @@ runs:
         DIST_TAG: ${{ inputs.dist-tag }}
         ACCESS: ${{ inputs.access }}
         DRY_RUN: ${{ inputs.dry-run }}
+        PROVENANCE: ${{ inputs.provenance }}
       run: |
         ARGS=(--tag "$DIST_TAG" --access "$ACCESS")
         if [ "$DRY_RUN" = "true" ]; then
           ARGS+=(--dry-run)
+        fi
+        if [ "$PROVENANCE" = "true" ]; then
+          ARGS+=(--provenance)
         fi
         if [ -z "$NODE_AUTH_TOKEN" ]; then
           echo "publishing with trusted publishing (OIDC)"

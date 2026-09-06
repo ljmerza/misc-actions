@@ -226,6 +226,7 @@ Publish a package to npm using trusted publishing (OIDC) or a classic automation
 | `dist-tag` | no | `latest` | npm dist-tag |
 | `access` | no | `public` | Package access; scoped packages default to restricted on npm |
 | `dry-run` | no | `false` | Publish with `--dry-run` and push nothing |
+| `provenance` | no | `true` | Pass `--provenance`. Needs a public package from a public repo |
 | `skip-if-published` | no | `true` | Exit successfully if this exact `name@version` is already on the registry |
 | `token` | no | `""` | npm automation token. Empty uses trusted publishing (OIDC) |
 
@@ -237,8 +238,13 @@ The action upgrades the npm CLI when the runner's is older than 11.5.1, the firs
 version that performs the OIDC exchange. Older CLIs fail with a plain
 authentication error that never mentions the version.
 
-Provenance is generated automatically for public repos publishing over OIDC, so
-`--provenance` is deliberately not passed.
+npm documents provenance as automatic for public repos publishing over OIDC, but
+that is disputed in practice, so `--provenance` is passed explicitly. The flag is
+a no-op where the automatic behaviour already applies. It does require a public
+package built from a public repo — set `provenance: "false"` for anything private.
+
+The `repository` field in `package.json` must match the repo the trusted publisher
+is registered against, or npm rejects the publish.
 
 `skip-if-published` exists because a release workflow commonly listens to both
 `push: tags` and `release: published`. Cutting a GitHub release from a fresh tag
